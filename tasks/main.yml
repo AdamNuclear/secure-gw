@@ -1,0 +1,111 @@
+---
+- name: Create group
+  group:
+    name: '{{ sgw_user }}'
+    state: present
+
+- name: Create user
+  user:
+    name: '{{ sgw_user }}'
+    comment: "SSH jumper"
+    uid: 1040
+    group: admin
+
+- name: Lock user
+  shell: "usermod --lock {{ sgw_user }}"
+
+- name: Create necessary directories
+  file:
+    path: '{{ item.path }}'
+    state: directory
+    owner: '{{ item.user }}'
+    group: '{{ item.user }}'
+    mode: 0755
+  with_items:
+    - { path: '/home/unseen/.aws', user: 'unseen'  }
+    - { path: '/home/{{ sgw_user }}/.aws', user: '{{ sgw_user }}'  }
+    - { path: '/home/{{ sgw_user }}/log', user: '{{ sgw_user }}'  }
+
+- name: Create necessary directories
+  file:
+    path: /home/{{ sgw_user }}/.ssh
+    state: directory
+    owner: '{{ sgw_user }}'
+    group: '{{ sgw_user }}'
+    mode: 0700
+
+- name: Upload authorized_keys
+  template:
+    src: authorized_keys
+    dest: /home/{{ sgw_user }}/.ssh/
+    group: '{{ sgw_user }}'
+    owner: '{{ sgw_user }}'
+    mode: 0644
+
+- name: Upload authorized_keys 4 unseen
+  template:
+    src: authorized_keys
+    dest: /home/unseen/.ssh/
+    group: unseen
+    owner: unseen
+    mode: 0644
+
+- name: Uplaod ldap_ssh loader script
+  template:
+    src: get_ldap_sshkeys.sh
+    dest: /root/get_ldap_sshkeys.sh
+    mode: 0700
+    group: root
+    owner: root
+
+- name: Upload .aws_config
+  template:
+    src: aws_config
+    dest: '{{ item.path }}/config'
+    mode: "0777"
+    group: '{{ item.user }}'
+    owner: '{{ item.user }}'
+  with_items:
+    - { path: '/home/unseen/.aws', user: 'unseen'  }
+    - { path: '/home/{{ sgw_user }}/.aws', user: '{{ sgw_user }}'  }
+
+- name: Upload broker
+  template:
+    src: "{{ item }}"
+    dest: /bin/{{ item }}
+    mode: "0777"
+  with_items:
+    - broker
+    - upload_queue2s3
+    - upload_old_sessions_2s3
+
+- name: Update ssh_config
+  lineinfile:
+    dest: "/etc/ssh/sshd_config"
+    line: 'PermitUserEnvironment yes'
+  notify: reload_ssh
+
+- name: Cron for ldap_keys
+  cron:
+    name: "Get keys from ldap every hour"
+    special_time: hourly
+    job: "/root/get_ldap_sshkeys.sh > /home/{{ sgw_user }}/.ssh/authorized_keys"
+
+- name: Generate users now !
+  shell: "/root/get_ldap_sshkeys.sh > /home/{{ sgw_user }}/.ssh/authorized_keys"
+
+- name: Cron for loguploader - queue
+  cron:
+    name: "Upload logs defined in QUEUE file"
+    special_time: hourly
+    job: /bin/upload_queue2s3
+  become: true
+  become_user: "{{ sgw_user }}"
+
+- name: Cron for loguploader - old sessions
+  cron:
+    name: "Upload logs older then x days"
+    special_time: daily
+    job: /bin/upload_old_sessions_2s3
+  become: true
+  become_user: "{{ sgw_user }}"

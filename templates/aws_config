@@ -1,0 +1,4 @@
+[profile secure]
+region=""
+role_arn=""
+credential_source=""

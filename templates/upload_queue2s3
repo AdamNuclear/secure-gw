@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Directory with session logs.
+declare -r LOGDIR=/home/{{ sgw_user }}/log
+declare -r HOSTNAME=`hostname`
+declare	-r LOG=$LOGDIR/${0##*/}.log
+declare -r QUEUE=$LOGDIR/QUEUE-$HOSTNAME.log
+
+# Go trough queue and upload files where session is finished
+for LOG_FILE in $(cat $QUEUE ); do
+  echo $LOG_FILE
+  /usr/local/bin/aws s3 mv $LOG_FILE.session s3://<bucket>/ --profile secure >>$LOG
+  /usr/local/bin/aws s3 mv $LOG_FILE.timing s3://<bucket>/ --profile secure >>$LOG
+
+  #Export all / in a $LOG_FILE path with a \/ for next sed parsing
+  PRE_PARSED=$(echo $LOG_FILE | sed -e 's/\//\\\//g')
+  #Remove uploaded files from QUEUE
+  sed -i '/'"$PRE_PARSED"'/d' $QUEUE
+done

@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Directory with session logs.
+declare -r LOGDIR=/home/{{ sgw_user }}/log
+declare -r HOSTNAME=`hostname`
+declare	-r LOG=$LOGDIR/${0##*/}.log
+declare -r ROTATION_DAYS="2"
+
+
+# Upload all timing files older then x days
+for LOG_FILE in $( find $LOGDIR/*.timing -mtime +$ROTATION_DAYS); do
+  /usr/local/bin/aws s3 mv $LOG_FILE s3://<bucket>/ --profile secure >>$LOG
+done
+
+# Upload all session files older then x days
+for LOG_FILE in $( find $LOGDIR/*.session -mtime +$ROTATION_DAYS); do
+  /usr/local/bin/aws s3 mv $LOG_FILE s3://<bucket>/ --profile secure >>$LOG
+done

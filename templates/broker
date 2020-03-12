@@ -1,0 +1,65 @@
+#!/bin/bash
+# Directory with session logs.
+declare -r LOGDIR=/home/{{ sgw_user }}/log
+declare	-r LOG=$LOGDIR/${0##*/}.log
+declare -r QUEUE=$LOGDIR/QUEUE-$HOSTNAME.log
+#declare        -r LOG=$LOGDIR/debug.log
+
+date +%F_%T >>$HOME/LOG
+/usr/bin/env >>$HOME/LOG 2>&1
+echo "$*" >>$HOME/LOG 2>&1
+
+# Parse the original slj command.  It should be string in the form of
+# service user@server
+read TSERVICE target <<<"$SSH_ORIGINAL_COMMAND"
+IFS=@ read TUSER TSERVER <<<"$target"
+
+# The verified information about the user we gont from command line
+#declare -r SSH_KEY_OWNER=${1}
+
+# Now we can declare the session basename.  It's composed from various parts
+# separated by dots.  These parts are:
+#     * timestamp: YYYYMMDD_HHMMSS
+#     * target server
+#     * target server user
+declare -r BASENAME="`date +%Y%m%d_%H%M%S`.$TSERVICE.$SSH_KEY_OWNER.$TSERVER.$TUSER"
+#NOTE: it's not enough.  If someone will try to connect as quickly as possible he will get same BASENAME.
+
+# Create session info file.
+#declare -r INFO=$LOGDIR/${BASENAME}.info
+declare -r INFO=$LOGDIR/debug.info
+echo "`hostname -s`:`date +%F\ %T`:$@" >>$INFO
+echo "ARGS: $*" >>$INFO
+echo "Environment" >>$INFO
+env >>$INFO
+
+
+# Do some login to general slj log.
+echo "`date +%F\ %T`: $SSH_KEY_OWNER -> $TSERVICE $TUSER@$TSERVER  ..." >>$LOG
+
+# Check the user authorization.  We have following information:
+# $SSH_KEY_OWNER - authenticated ssh key owner
+# $SSH_KEY_GROUP - authenticated ssh keys from ldap_group
+# $TUSER	- remote server user
+# $TSERVER	- remote server
+case $SSH_KEY_GROUP:$TSERVICE:$TUSER:$TSERVER in
+  # access to servers in vpc with A network without key checking
+  ldap_devops:ssh:user:10.*)	connection_command="ssh -A -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $TUSER@$TSERVER";;
+  # General access for superadmin's
+  ldap_devops:ssh:*:*)	connection_command="ssh -A -t $TUSER@$TSERVER";;
+
+  *)
+    # User $SSH_KEY_OWNER is not authorized to use $TUSER@$TSERVER
+    echo "`date +%F\ %T`: $SSH_KEY_OWNER -> $TSERVICE $TUSER@$TSERVER  REJECTED" >>$LOG
+    echo "case '$SSH_KEY_OWNER:$TSERVICE:$TUSER:$TSERVER'" >>$LOG
+    echo "REJECTED"
+    echo "$SSH_KEY_OWNER"
+    exit 1
+    ;;
+esac
+
+# Open user session with recording session log.
+echo "`date +%F\ %T`: $SSH_KEY_OWNER -> $TSERVICE $TUSER@$TSERVER  AUTHORIZED, OPENING" >>$LOG
+script -a -f -q -c "$connection_command" -t 2> $LOGDIR/${BASENAME}.timing $LOGDIR/${BASENAME}.session
+echo "`date +%F\ %T`: $SSH_KEY_OWNER -> $TSERVICE $TUSER@$TSERVER  CLOSED" >>$LOG
+echo $LOGDIR/${BASENAME} >>$QUEUE
